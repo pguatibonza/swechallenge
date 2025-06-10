@@ -65,6 +65,7 @@
 /* Search bar */
 .search-group {
   margin-bottom: 1rem;
+  margin-right: 1rem;
 }
 
 .search-group input {
@@ -112,4 +113,65 @@
 .stock-table tbody tr:hover {
   background: #4a5568;
   cursor: pointer;
+}
+/* Detail View “Card” */
+.stock-detail-container {
+  background: #1e2230;           /* same as .stock-table bg */
+  color: #e2e8f0;                /* same text color */
+  border-radius: 0.5rem;         /* match your table */
+  padding: 1.5rem;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.5);
+  max-width: 600px;              /* optional: constrain width */
+  margin: 2rem auto;             /* center or adjust as needed */
+}
+
+/* Header */
+.detail-header {
+  background: #2d3445;           /* same as <thead> */
+  padding: 0.75rem 1rem;
+  border-radius: 0.375rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  color: #cbd5e0;                /* same as sidebar labels */
+}
+
+/* List reset */
+.detail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Each row */
+.detail-list li {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid #4a5568; /* same as table rows */
+}
+
+/* Remove bottom border on last item */
+.detail-list li:last-child {
+  border-bottom: none;
+}
+
+/* Label column */
+.detail-list .label {
+  font-weight: 600;
+  color: #cbd5e0;
+  width: 45%;
+}
+
+/* Value column */
+.detail-list .value {
+  text-align: right;
+  color: #e2e8f0;
+}
+
+/* Loading state (optional) */
+.loading {
+  color: #e2e8f0;
+  text-align: center;
+  padding: 2rem;
 }
