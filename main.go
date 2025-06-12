@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -56,9 +58,38 @@ var insertStmt = `
 		INSERT INTO stock_info (
 		ticker, company, brokerage, action,
 		rating_from, rating_to, target_from, target_to,
-		time
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		time, current_price
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
+var ratingScore = map[string]int{
+	"Strong-Buy":        2,
+	"Outperform":        2,
+	"Market Outperform": 2,
+	"Sector Outperform": 2,
+	"Buy":               1,
+	"Overweight":        1,
+	"Equal Weight":      0,
+	"Market Perform":    0,
+	"Sector Perform":    0,
+	"Hold":              0,
+	"Unchanged":         0,
+	"Underweight":       -1,
+	"Sell":              -1,
+	"Underperform":      -2,
+}
+
+type RecResult struct {
+	Ticker       string  `json:"ticker"`
+	Company      string  `json:"company"`
+	Brokerage    string  `json:"brokerage"`
+	RatingFrom   string  `json:"rating_from"`
+	RatingTo     string  `json:"rating_to"`
+	TargetFrom   float64 `json:"target_from"`
+	TargetTo     float64 `json:"target_to"`
+	CurrentPrice float64 `json:"current_price"`
+	UpsidePct    float64 `json:"upside_pct"`
+	Composite    float64 `json:"composite"`
+}
 
 func main() {
 	mode := flag.String("mode", "serve", "Mode to run: 'fetch' to load data, 'serve' to start HTTP API")
@@ -102,6 +133,9 @@ func startServer(db *sql.DB) {
 	})
 	mux.HandleFunc("/stocks/", func(w http.ResponseWriter, r *http.Request) {
 		handleStock(w, r, db)
+	})
+	mux.HandleFunc("/recommend", func(w http.ResponseWriter, r *http.Request) {
+		handleRecommend(w, r, db)
 	})
 
 	addr := ":8081"
@@ -154,6 +188,7 @@ func fetchAndStoreAllPages(db *sql.DB, prep *sql.Stmt) error {
 			if err := insertStockItem(prep, &item); err != nil {
 				log.Printf("warning: failed to insert ticker %s: %v", item.Ticker, err)
 			}
+
 		}
 
 		// If next_page is empty, break; otherwise, loop again
@@ -168,7 +203,7 @@ func fetchAndStoreAllPages(db *sql.DB, prep *sql.Stmt) error {
 
 // insertStockItem parses fields and executes the prepared INSERT statement.
 func insertStockItem(prep *sql.Stmt, item *StockItem) error {
-	// 1. Parse the target_from string (strip "$")
+	// Parse the target_from string (strip "$")
 	var tf *float64
 	if item.TargetFrom != "" {
 		cleaned := strings.ReplaceAll(item.TargetFrom, ",", "")
@@ -179,7 +214,7 @@ func insertStockItem(prep *sql.Stmt, item *StockItem) error {
 		}
 		tf = &parsed
 	}
-	// 2. Parse the target_to string
+	//  Parse the target_to string
 	var tt *float64
 	if item.TargetTo != "" {
 		cleaned := strings.ReplaceAll(item.TargetTo, ",", "")
@@ -191,13 +226,19 @@ func insertStockItem(prep *sql.Stmt, item *StockItem) error {
 		tt = &parsed
 	}
 
-	// 3. Parse the raw time
+	// Parse the raw time
 	parsedTime, err := time.Parse(time.RFC3339Nano, item.Time)
 	if err != nil {
 		return fmt.Errorf("parsing Time %q: %w", item.Time, err)
 	}
 
-	// 4. Execute the INSERT (using nil for DECIMAL columns if parsing failed or was empty)
+	cp, err := fetchCurrentPrice(item.Ticker)
+	if err != nil {
+		log.Printf("warning: no pude obtener precio para %s: %v", item.Ticker, err)
+		cp = 0.0
+	}
+
+	//  Execute the INSERT (using nil for DECIMAL columns if parsing failed or was empty)
 	_, err = prep.Exec(
 		item.Ticker,
 		item.Company,
@@ -208,11 +249,65 @@ func insertStockItem(prep *sql.Stmt, item *StockItem) error {
 		tf,
 		tt,
 		parsedTime,
+		cp,
 	)
 	if err != nil {
 		return fmt.Errorf("exec insert: %w", err)
 	}
 	return nil
+}
+func fetchCurrentPrice(ticker string) (float64, error) {
+	url := fmt.Sprintf(
+		"https://query1.finance.yahoo.com/v8/finance/chart/%s?region=US&lang=en-US&includePrePost=false&interval=1d&range=1d",
+		ticker,
+	)
+
+	// 1) Creamos la petición con User-Agent
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return 0, fmt.Errorf("crear request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; AcmeInc/1.0)")
+
+	// 2) Ejecutamos con timeout
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("http get: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// 3) Si no es 200, devolvemos el body como error
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	// 4) Decodificamos JSON
+	var payload struct {
+		Chart struct {
+			Result []struct {
+				Meta struct {
+					RegularMarketPrice float64 `json:"regularMarketPrice"`
+				} `json:"meta"`
+			} `json:"result"`
+			Error interface{} `json:"error"`
+		} `json:"chart"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		// leemos el body completo para diagnóstico
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("decode JSON: %w – body: %s", err, string(bodyBytes))
+	}
+
+	// 5) Manejo de error en la respuesta de Yahoo
+	if payload.Chart.Error != nil {
+		return 0, fmt.Errorf("yahoo error: %v", payload.Chart.Error)
+	}
+	if len(payload.Chart.Result) == 0 {
+		return 0, fmt.Errorf("sin resultado para %s", ticker)
+	}
+
+	return payload.Chart.Result[0].Meta.RegularMarketPrice, nil
 }
 
 // handleStocks returns a list of stocks, supports search, sort, pagination.
@@ -426,4 +521,85 @@ func splitParam(v string) []string {
 		}
 	}
 	return out
+}
+
+func handleRecommend(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	//  obtener el último informe de cada ticker
+	const sqlLatest = `
+	SELECT DISTINCT ON (ticker)
+		ticker,
+		company,
+		brokerage,
+		rating_from,
+		rating_to,
+		target_from::FLOAT,
+		target_to::FLOAT,
+		current_price
+	FROM stock_info
+	WHERE current_price <>0;
+    `
+	rows, err := db.Query(sqlLatest)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	const alpha = 0.7 // peso para upside
+	const beta = 0.3
+
+	var recs []RecResult
+	for rows.Next() {
+		var (
+			ticker, company, brokerage, fromRating, toRating string
+			tf, tt, price                                    float64
+		)
+		if err := rows.Scan(&ticker, &company, &brokerage, &fromRating, &toRating, &tf, &tt, &price); err != nil {
+			log.Printf("scan row: %v", err)
+
+		}
+
+		//  Calcular upside y rating norm
+		avgTarget := (tf + tt) / 2
+		upsidePct := (avgTarget - price) / price
+
+		deltaScore := float64(ratingScore[toRating] - ratingScore[fromRating])
+
+		composite := alpha*upsidePct + beta*deltaScore
+
+		recs = append(recs, RecResult{
+			Ticker:       ticker,
+			Company:      company,
+			Brokerage:    brokerage,
+			RatingFrom:   fromRating,
+			RatingTo:     toRating,
+			TargetFrom:   tf,
+			TargetTo:     tt,
+			CurrentPrice: price,
+			UpsidePct:    upsidePct,
+			Composite:    composite,
+		})
+	}
+
+	// Revisar errores de iteración
+	if err := rows.Err(); err != nil {
+		log.Printf("rows error: %v", err)
+	}
+
+	// Ordenamos descendentemente por Composite
+	sort.Slice(recs, func(i, j int) bool {
+		return recs[i].Composite > recs[j].Composite
+	})
+
+	// Tomamos los primeros 10
+	topN := 10
+	if len(recs) < topN {
+		topN = len(recs)
+	}
+	topRecs := recs[:topN]
+	fmt.Println(topRecs)
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(topRecs); err != nil {
+		log.Printf("encode json: %v", err)
+	}
 }

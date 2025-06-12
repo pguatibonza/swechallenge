@@ -11,6 +11,8 @@
           <option v-for="opt in actionOptions" :key="opt" :value="opt">{{ opt }}</option>
         </select>
       </div>
+    
+
 
       <!-- Rating filter -->
       <div class="filter-group">
@@ -61,6 +63,12 @@
           </select>
         </div>
       </div>
+
+            <!-- Recommendation Button -->
+      <div class="recommend-group">
+        <button class="recommend-btn" @click="goRecommend"> Top 10</button>
+      </div>
+
     </aside>
 
     <!-- Main content: Search + Table -->
@@ -113,6 +121,12 @@ const router = useRouter()
 function viewDetail(ticker: string) {
   router.push({ name: 'StockDetail', params: { ticker } })
 }
+
+function goRecommend(){
+    router.push({name : 'Recommend'})
+}
+    
+
 
 const stocks = ref<StockItem[]>([])
 const actionOptions = ref<string[]>([])
