@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
 
@@ -75,9 +76,7 @@ var ratingScore = map[string]int{
 	"Underperform":      -2,
 }
 
-var APIEndpoint = os.Getenv("API_ENDPOINT")
-var BearerToken = os.Getenv("BEARER_TOKEN")
-var DBConnString = os.Getenv("DB_CONN_STRING")
+var APIEndpoint, BearerToken, DBConnString = "", "", ""
 
 type RecResult struct {
 	Ticker       string  `json:"ticker"`
@@ -94,9 +93,16 @@ type RecResult struct {
 
 func main() {
 
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found, relying on environment variables")
+	}
+
+	APIEndpoint = os.Getenv("API_ENDPOINT")
+	BearerToken = os.Getenv("BEARER_TOKEN")
+	DBConnString = os.Getenv("DB_CONN_STRING")
+
 	mode := flag.String("mode", "serve", "Mode to run: 'fetch' to load data, 'serve' to start HTTP API")
 	flag.Parse()
-
 	// Open DB connection
 	db, err := sql.Open("postgres", DBConnString)
 	if err != nil {
