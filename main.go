@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,11 +17,7 @@ import (
 	_ "github.com/lib/pq"
 )
 
-const (
-	APIEndpoint  = "https://8j5baasof2.execute-api.us-west-2.amazonaws.com/production/swechallenge/list"
-	BearerToken  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdHRlbXB0cyI6MTYsImVtYWlsIjoicGFibG9hZ3VhdGlAZ21haWwuY29tIiwiZXhwIjoxNzQ5MzE4NTg4LCJpZCI6IjAiLCJwYXNzd29yZCI6IicgT1IgJzEnPScxIn0.Aw-Wss9QuY_SrgUEkEuxA9OfJ6NdEccHzqujmx7gbZ8"
-	DBConnString = "postgresql://root@localhost:26257/stock_data?sslmode=disable"
-)
+const ()
 
 // enableCors wraps an http.Handler to add CORS headers
 func enableCors(h http.Handler) http.Handler {
@@ -78,6 +75,10 @@ var ratingScore = map[string]int{
 	"Underperform":      -2,
 }
 
+var APIEndpoint = os.Getenv("API_ENDPOINT")
+var BearerToken = os.Getenv("BEARER_TOKEN")
+var DBConnString = os.Getenv("DB_CONN_STRING")
+
 type RecResult struct {
 	Ticker       string  `json:"ticker"`
 	Company      string  `json:"company"`
@@ -92,6 +93,7 @@ type RecResult struct {
 }
 
 func main() {
+
 	mode := flag.String("mode", "serve", "Mode to run: 'fetch' to load data, 'serve' to start HTTP API")
 	flag.Parse()
 
